@@ -28,6 +28,6 @@ exe = EXE(
     debug=True,
     strip=False,
     upx=False,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
 )

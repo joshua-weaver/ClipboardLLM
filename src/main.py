@@ -29,15 +29,19 @@ def get_config_path():
     return os.path.join(base_dir, 'config.json')
 
 class LLMClient:
-    def __init__(self, api_key, provider="openai"):
+    def __init__(self, api_key, provider="openai", model=None):
         self.api_key = api_key
         self.provider = provider.lower()
+        self.model = model
         if self.provider == "openai":
             self.endpoint = "https://api.openai.com/v1/chat/completions"
+            self.model = model or "gpt-4"
         elif self.provider == "anthropic":
             self.endpoint = "https://api.anthropic.com/v1/messages"
+            self.model = model or "claude-3-sonnet-20240229"
         elif self.provider == "gemini":
             self.endpoint = None
+            self.model = model or "models/gemini-2.0-flash"
         else:
             self.endpoint = ""
 
@@ -50,7 +54,7 @@ class LLMClient:
                     "content-type": "application/json"
                 }
                 data = {
-                    "model": "claude-3-sonnet-20240229",
+                    "model": self.model,
                     "max_tokens": 1024,
                     "messages": [
                         {"role": "user", "content": content}
@@ -72,7 +76,7 @@ class LLMClient:
                 try:
                     import google.generativeai as genai
                     genai.configure(api_key=self.api_key)
-                    model = genai.GenerativeModel('models/gemini-2.0-flash')
+                    model = genai.GenerativeModel(self.model)
                     response = model.generate_content(content)
                     return response.text
                 except ImportError:
@@ -84,7 +88,7 @@ class LLMClient:
                     "Content-Type": "application/json"
                 }
                 data = {
-                    "model": "gpt-4o-mini",
+                    "model": self.model,
                     "messages": [{"role": "user", "content": content}],
                     "max_tokens": 1024
                 }
@@ -227,11 +231,13 @@ class MainWindow:
                 config = json.load(f)
             active = config.get("selected_provider", "openai")
             providers = config.get("providers", {})
-            api_key = providers.get(active, {}).get("api_key", "")
+            provider_config = providers.get(active, {})
+            api_key = provider_config.get("api_key", "")
+            model = provider_config.get("model", "")
             if not api_key:
                 self.show_settings()
             else:
-                self.llm_client = LLMClient(api_key, provider=active)
+                self.llm_client = LLMClient(api_key, provider=active, model=model)
                 self.start_monitoring()
         except Exception:
             self.show_settings()
@@ -239,32 +245,51 @@ class MainWindow:
     def show_settings(self):
         dialog = tk.Toplevel(self.root)
         dialog.title("API Key Configuration")
-        dialog.geometry("400x400")
+        dialog.geometry("600x500")  # Made wider to accommodate model fields
         frame = ttk.Frame(dialog, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
         
-        # Provider selection with radio buttons
-        selected_provider = tk.StringVar(value="openai")
-        ttk.Label(frame, text="Select Primary Provider:", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, columnspan=2, pady=(0, 10), sticky="w")
+        # Header labels
+        ttk.Label(frame, text="Configure Providers:", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, columnspan=4, pady=(0, 10), sticky="w")
         
-        providers = ["OpenAI", "Anthropic", "Gemini"]
-        for i, prov in enumerate(providers):
-            ttk.Radiobutton(
-                frame, 
-                text=prov,
-                value=prov.lower(),
-                variable=selected_provider
-            ).grid(row=1, column=i, padx=10, sticky="w")
+        # Column headers
+        ttk.Label(frame, text="Provider", font=("Segoe UI", 9, "bold")).grid(row=1, column=0, pady=(0, 10), sticky="w")
+        ttk.Label(frame, text="API Key", font=("Segoe UI", 9, "bold")).grid(row=1, column=1, pady=(0, 10), sticky="w", padx=(10, 0))
+        ttk.Label(frame, text="Model", font=("Segoe UI", 9, "bold")).grid(row=1, column=2, pady=(0, 10), sticky="w")
+        ttk.Label(frame, text="Primary", font=("Segoe UI", 9, "bold")).grid(row=1, column=3, pady=(0, 10), sticky="w", padx=(10, 0))
         
-        # API Key entries in a grid
-        ttk.Label(frame, text="API Keys:", font=("Segoe UI", 10, "bold")).grid(row=2, column=0, columnspan=3, pady=(20, 10), sticky="w")
+        # Default model values
+        default_models = {
+            "openai": "gpt-4",
+            "anthropic": "claude-3-sonnet-20240229",
+            "gemini": "models/gemini-2.0-flash"
+        }
         
         entries = {}
+        model_entries = {}
+        selected_provider = tk.StringVar(value="openai")
+        
         for i, prov in enumerate(["openai", "anthropic", "gemini"]):
-            ttk.Label(frame, text=f"{prov.capitalize()}:").grid(row=i+3, column=0, sticky="w", pady=5)
-            entry = ttk.Entry(frame)
-            entry.grid(row=i+3, column=1, columnspan=2, sticky="ew", pady=5, padx=(10, 0))
-            entries[prov] = entry
+            # Provider label
+            ttk.Label(frame, text=f"{prov.capitalize()}:").grid(row=i+2, column=0, sticky="w", pady=5)
+            
+            # API Key entry
+            key_entry = ttk.Entry(frame)
+            key_entry.grid(row=i+2, column=1, sticky="ew", pady=5, padx=(10, 10))
+            entries[prov] = key_entry
+            
+            # Model entry
+            model_entry = ttk.Entry(frame)
+            model_entry.insert(0, default_models[prov])
+            model_entry.grid(row=i+2, column=2, sticky="ew", pady=5)
+            model_entries[prov] = model_entry
+            
+            # Radio button
+            ttk.Radiobutton(
+                frame,
+                value=prov.lower(),
+                variable=selected_provider
+            ).grid(row=i+2, column=3, pady=5, padx=(10, 0))
         
         # Load existing configuration
         config_path = get_config_path()
@@ -274,40 +299,43 @@ class MainWindow:
             active = config.get("selected_provider", "openai")
             selected_provider.set(active)
             provs = config.get("providers", {})
-            entries["openai"].insert(0, provs.get("openai", {}).get("api_key", ""))
-            entries["anthropic"].insert(0, provs.get("anthropic", {}).get("api_key", ""))
-            entries["gemini"].insert(0, provs.get("gemini", {}).get("api_key", ""))
+            for prov in ["openai", "anthropic", "gemini"]:
+                if prov in provs:
+                    entries[prov].insert(0, provs[prov].get("api_key", ""))
+                    if "model" in provs[prov]:
+                        model_entries[prov].delete(0, tk.END)
+                        model_entries[prov].insert(0, provs[prov]["model"])
         except Exception as e:
             print(f"Error loading config: {e}")
 
         def save():
-            openai_key = entries["openai"].get().strip()
-            anthropic_key = entries["anthropic"].get().strip()
-            gemini_key = entries["gemini"].get().strip()
             active = selected_provider.get()
             config_data = {
                 "selected_provider": active,
                 "providers": {
-                    "openai": {"api_key": openai_key},
-                    "anthropic": {"api_key": anthropic_key},
-                    "gemini": {"api_key": gemini_key}
+                    prov: {
+                        "api_key": entries[prov].get().strip(),
+                        "model": model_entries[prov].get().strip()
+                    }
+                    for prov in ["openai", "anthropic", "gemini"]
                 }
             }
             with open(config_path, 'w') as f:
                 json.dump(config_data, f, indent=4)
-            active_key = {"openai": openai_key, "anthropic": anthropic_key, "gemini": gemini_key}[active]
-            self.llm_client = LLMClient(active_key, provider=active)
+            active_key = config_data["providers"][active]["api_key"]
+            active_model = config_data["providers"][active]["model"]
+            self.llm_client = LLMClient(active_key, provider=active, model=active_model)
             dialog.destroy()
             self.status.config(text="Config saved!")
             self.start_monitoring()
         
         # Save button at the bottom
         btn_save = ttk.Button(frame, text="Save", command=save)
-        btn_save.grid(row=6, column=0, columnspan=3, pady=(20, 0))
+        btn_save.grid(row=5, column=0, columnspan=4, pady=(20, 0))
         
         # Configure grid weights
-        frame.columnconfigure(1, weight=1)  # Make the entry column expandable
-        frame.columnconfigure(2, weight=1)  # Make the last column expandable too
+        frame.columnconfigure(1, weight=1)  # Make API Key column expandable
+        frame.columnconfigure(2, weight=1)  # Make Model column expandable
 
     def show_readme(self):
         readme_dialog = tk.Toplevel(self.root)
@@ -319,31 +347,21 @@ class MainWindow:
         frame = ttk.Frame(readme_dialog, padding="10")
         frame.grid(row=0, column=0, sticky="nsew")
         
-        readme_text = """ClipboardLLM
-ClipboardLLM is an open source application licensed under the MIT License that monitors your clipboard and sends its content to various language models (OpenAI, Anthropic, Gemini) for processing. You can compile for yourself or download the latest build from the /dist/ folder.
+        readme_text = """ClipboardLLM ClipboardLLM is an open source application licensed under the MIT License that monitors your clipboard and sends its content to various language models (OpenAI, Anthropic, Gemini) for processing. You can compile for yourself or download the latest build from the /dist/ folder.
 
 Features
---------
-Automatic Clipboard Monitoring: Simply copy text to your clipboard, and it will be automatically sent to the selected language model.
-Manual Input: Enter text manually into the input box and press Enter or click Send.
-Easy API Configuration: Set up your API keys effortlessly via the Settings menu.
+Automatic Clipboard Monitoring: Simply copy text to your clipboard, and it will be automatically sent to the selected language model. Manual Input: Enter text manually into the input box and press Enter or click Send. Easy API Configuration: Set up your API keys effortlessly via the Settings menu.
 
 Supported Providers
--------------------
-OpenAI: Chat models via the OpenAI API.
-Anthropic: Claude models via the Anthropic API.
-Gemini: Models via the Google Gemini API.
+OpenAI: Chat models via the OpenAI API. Anthropic: Claude models via the Anthropic API. Gemini: Models via the Google Gemini API.
 
 Getting Started
----------------
-Enter the API key(s) of your choice and select your preferred provider. Then copying text will automatically send it to the configured LLM.
+Either compile yourself or use the .exe found in /dist/CLipboardLLM.exe. Enter the API key(s) of your choice and select your preferred provider. Then copying text will automatically send it to the configured LLM as long as ClipboardLLM is running.
 
 License
--------
 ClipboardLLM is open source and licensed under the MIT License. https://github.com/joshua-weaver/ClipboardLLM
 
 Support
--------
 If you'd like to support the project, send a tip via Venmo at @jshwvr or connect on X at x.com/we4v3r.
 
 Enjoy using ClipboardLLM!
