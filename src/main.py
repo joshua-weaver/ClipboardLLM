@@ -137,6 +137,7 @@ class MainWindow:
         frame = ttk.Frame(self.root, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
 
+        # Chat history
         self.chat_text = scrolledtext.ScrolledText(
             frame,
             wrap=tk.WORD,
@@ -148,6 +149,21 @@ class MainWindow:
         )
         self.chat_text.pack(fill=tk.BOTH, expand=True)
 
+        # Add clipboard preview box (initially hidden)
+        self.preview_frame = ttk.LabelFrame(frame, text="Clipboard Content", padding="5")
+        
+        self.clipboard_preview = scrolledtext.ScrolledText(
+            self.preview_frame,
+            wrap=tk.WORD,
+            height=3,
+            font=("Segoe UI", 10),
+            background="#1e1e1e",
+            foreground="#ffffff",
+            insertbackground="#ffffff"
+        )
+        self.clipboard_preview.pack(fill=tk.X)
+
+        # Input area
         input_frame = ttk.Frame(frame)
         input_frame.pack(fill=tk.X, pady=(5, 0))
         self.input_text = tk.Text(
@@ -164,6 +180,18 @@ class MainWindow:
         self.input_text.bind("<Shift-Return>", lambda e: "break")
         send_button = ttk.Button(input_frame, text="Send", command=self.send_message)
         send_button.grid(row=0, column=1, sticky="nsew")
+        
+        # Auto-send toggle with callback
+        self.auto_send = tk.BooleanVar(value=True)  # Default to True for existing behavior
+        self.auto_send.trace_add("write", self.on_auto_send_change)  # Add callback for value changes
+        auto_send_toggle = ttk.Checkbutton(
+            input_frame,
+            text="Auto Send",
+            variable=self.auto_send,
+            style="Switch.TCheckbutton"
+        )
+        auto_send_toggle.grid(row=1, column=0, columnspan=2, pady=(5, 0), sticky="w")
+        
         input_frame.columnconfigure(0, weight=1)
 
         self.status = ttk.Label(frame, text="Starting...")
@@ -187,32 +215,68 @@ class MainWindow:
         return None
 
     def send_message(self):
-        message = self.input_text.get("1.0", tk.END).strip()
+        """Modified to include clipboard content when sending."""
+        context = self.input_text.get("1.0", tk.END).strip()
+        clipboard_content = self.clipboard_preview.get("1.0", tk.END).strip()
+        
+        # Combine clipboard content and context if both exist
+        if clipboard_content and context:
+            message = f"Clipboard Content:\n{clipboard_content}\n\nAdditional Context:\n{context}"
+        elif clipboard_content:
+            message = clipboard_content
+        else:
+            message = context
+
         if not message:
             return
+        
         if not self.llm_client:
             self.add_message("Error: Please configure API key first", is_user=False)
             return
+
+        # Clear both input boxes
         self.input_text.delete("1.0", tk.END)
+        self.clipboard_preview.delete("1.0", tk.END)
+        
         self.add_message(message, is_user=True)
         self.status.config(text="Processing message...")
+        
         def process():
             response = self.llm_client.process_content(message)
             self.root.after(0, lambda: self.add_message(response, is_user=False))
             self.root.after(0, lambda: self.status.config(text="Ready"))
+        
         threading.Thread(target=process, daemon=True).start()
 
     def on_clipboard_change(self, content):
         if not self.llm_client:
             self.add_message("Error: Please configure API key first", is_user=False)
             return
-        self.add_message(f"Copied: {content}", is_user=True)
-        self.status.config(text="Processing clipboard content...")
-        def process():
-            response = self.llm_client.process_content(content)
-            self.root.after(0, lambda: self.add_message(response, is_user=False))
-            self.root.after(0, lambda: self.status.config(text="Monitoring clipboard..."))
-        threading.Thread(target=process, daemon=True).start()
+            
+        if self.auto_send.get():
+            # Original auto-send behavior
+            self.add_message(f"Copied: {content}", is_user=True)
+            self.status.config(text="Processing clipboard content...")
+            def process():
+                response = self.llm_client.process_content(content)
+                self.root.after(0, lambda: self.add_message(response, is_user=False))
+                self.root.after(0, lambda: self.status.config(text="Monitoring clipboard..."))
+            threading.Thread(target=process, daemon=True).start()
+        else:
+            # Just update the preview when auto-send is off
+            self.clipboard_preview.delete("1.0", tk.END)
+            self.clipboard_preview.insert(tk.END, content)
+            self.status.config(text="Content loaded. Add context and press Send when ready.")
+
+    def on_auto_send_change(self, *args):
+        """Handle changes to auto-send toggle."""
+        if self.auto_send.get():
+            # Hide preview and clear its content when enabling auto-send
+            self.preview_frame.pack_forget()
+            self.clipboard_preview.delete("1.0", tk.END)
+        else:
+            # Show preview when disabling auto-send
+            self.preview_frame.pack(after=self.chat_text, fill=tk.X, pady=(10, 10))
 
     def add_message(self, message: str, is_user: bool = False):
         self.chat_text.configure(state=tk.NORMAL)
@@ -277,7 +341,6 @@ class MainWindow:
             key_entry = ttk.Entry(frame)
             key_entry.grid(row=i+2, column=1, sticky="ew", pady=5, padx=(10, 10))
             entries[prov] = key_entry
-            
             # Model entry
             model_entry = ttk.Entry(frame)
             model_entry.insert(0, default_models[prov])
@@ -287,6 +350,7 @@ class MainWindow:
             # Radio button
             ttk.Radiobutton(
                 frame,
+                text="",  # Add empty text to avoid default text
                 value=prov.lower(),
                 variable=selected_provider
             ).grid(row=i+2, column=3, pady=5, padx=(10, 0))
