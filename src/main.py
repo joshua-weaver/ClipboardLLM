@@ -38,6 +38,15 @@ class LLMClient:
         self.api_key = api_key
         self.provider = provider.lower()
         self.model = model
+        
+        # Load config to get system prompt
+        try:
+            with open(get_config_path(), 'r') as f:
+                config = json.load(f)
+                self.system_prompt = config.get("system_prompt", "You are a helpful AI assistant.")
+        except Exception:
+            self.system_prompt = "You are a helpful AI assistant."
+        
         if self.provider == "openai":
             self.endpoint = "https://api.openai.com/v1/chat/completions"
             self.model = model or "gpt-4"
@@ -112,10 +121,6 @@ class LLMClient:
                         image.save(buffer, format='JPEG', quality=95, subsampling=0)
                         image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
                         
-                        # Save the actual bytes being sent to AI
-                        with open('debug_4_sent_to_ai.jpg', 'wb') as f:
-                            f.write(base64.b64decode(image_b64))
-                        
                         print("Successfully converted image to base64")
                     except Exception as e:
                         print(f"Error converting image: {str(e)}")
@@ -133,6 +138,7 @@ class LLMClient:
                     data = {
                         "model": self.model,
                         "messages": [
+                            {"role": "system", "content": self.system_prompt},
                             {
                                 "role": "user",
                                 "content": [
@@ -157,7 +163,7 @@ class LLMClient:
                         genai.configure(api_key=self.api_key)
                         model = genai.GenerativeModel('gemini-pro-vision')
                         response = model.generate_content(
-                            ["Describe this image:", {"mime_type": "image/jpeg", "data": base64.b64decode(image_b64)}]
+                            [self.system_prompt, {"mime_type": "image/jpeg", "data": base64.b64decode(image_b64)}]
                         )
                         return response.text
                     except ImportError:
@@ -178,6 +184,7 @@ class LLMClient:
                     "model": self.model,
                     "max_tokens": 1024,
                     "messages": [
+                        {"role": "system", "content": self.system_prompt},
                         {"role": "user", "content": content}
                     ]
                 }
@@ -198,7 +205,7 @@ class LLMClient:
                     import google.generativeai as genai
                     genai.configure(api_key=self.api_key)
                     model = genai.GenerativeModel(self.model)
-                    response = model.generate_content(content)
+                    response = model.generate_content(f"{self.system_prompt}\n\nUser: {content}")
                     return response.text
                 except ImportError:
                     return ("Error: google-generativeai package is not installed. "
@@ -210,7 +217,7 @@ class LLMClient:
                 }
                 data = {
                     "model": self.model,
-                    "messages": [{"role": "user", "content": content}],
+                    "messages": [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": content}],
                     "max_tokens": 1024
                 }
                 response = requests.post(self.endpoint, headers=headers, json=data, timeout=30)
@@ -367,10 +374,10 @@ class MainWindow:
 
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-        settings_menu.add_command(label="Configure API Keys", command=self.show_settings)
-        settings_menu.add_command(label="Readme", command=self.show_readme)
+        main_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Menu", menu=main_menu)
+        main_menu.add_command(label="Settings", command=self.show_settings)
+        main_menu.add_command(label="Readme", command=self.show_readme)
 
         self.monitor = ClipboardMonitor(self.on_clipboard_change)
         self.llm_client = None
@@ -415,7 +422,7 @@ class MainWindow:
         
         # Handle different content types
         if self.current_content_type == "image":
-            if context:
+            if context and not self.auto_send.get():
                 message = f"Image content with additional context:\n{context}"
             else:
                 message = "Image content"
@@ -424,7 +431,8 @@ class MainWindow:
             self.add_message(message, is_user=True, image_data=content)
         else:
             # Text content handling
-            if clipboard_content and context:
+            if clipboard_content and context and not self.auto_send.get():
+                # Only combine content and context when auto-send is off
                 message = f"Clipboard Content:\n{clipboard_content}\n\nAdditional Context:\n{context}"
                 content = message
             elif clipboard_content:
@@ -588,22 +596,23 @@ class MainWindow:
 
     def show_settings(self):
         dialog = tk.Toplevel(self.root)
-        dialog.title("API Key Configuration")
-        dialog.geometry("600x500")
-        frame = ttk.Frame(dialog, padding="10")
+        dialog.title("Settings")
+        dialog.geometry("600x600")
+        frame = ttk.Frame(dialog, padding="20")
         frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(frame, text="Configure Providers:", font=("Segoe UI", 10, "bold")).grid(
-            row=0, column=0, columnspan=4, pady=(0, 10), sticky="w")
+        # API Configuration Section
+        ttk.Label(frame, text="API Configuration", font=("Segoe UI", 12, "bold")).grid(
+            row=0, column=0, columnspan=4, pady=(0, 20), sticky="w")
         
-        ttk.Label(frame, text="Provider", font=("Segoe UI", 9, "bold")).grid(
+        ttk.Label(frame, text="Provider", font=("Segoe UI", 10, "bold")).grid(
             row=1, column=0, pady=(0, 10), sticky="w")
-        ttk.Label(frame, text="API Key", font=("Segoe UI", 9, "bold")).grid(
-            row=1, column=1, pady=(0, 10), sticky="w", padx=(10, 0))
-        ttk.Label(frame, text="Model", font=("Segoe UI", 9, "bold")).grid(
-            row=1, column=2, pady=(0, 10), sticky="w")
-        ttk.Label(frame, text="Primary", font=("Segoe UI", 9, "bold")).grid(
-            row=1, column=3, pady=(0, 10), sticky="w", padx=(10, 0))
+        ttk.Label(frame, text="API Key", font=("Segoe UI", 10, "bold")).grid(
+            row=1, column=1, pady=(0, 10), sticky="w", padx=(20, 0))
+        ttk.Label(frame, text="Model", font=("Segoe UI", 10, "bold")).grid(
+            row=1, column=2, pady=(0, 10), sticky="w", padx=(20, 0))
+        ttk.Label(frame, text="Primary", font=("Segoe UI", 10, "bold")).grid(
+            row=1, column=3, pady=(0, 10), sticky="w", padx=(20, 0))
         
         default_models = {
             "openai": "gpt-4-vision-preview",
@@ -616,22 +625,39 @@ class MainWindow:
         selected_provider = tk.StringVar(value="openai")
         
         for i, prov in enumerate(["openai", "anthropic", "gemini"]):
-            ttk.Label(frame, text=f"{prov.capitalize()}:").grid(row=i+2, column=0, sticky="w", pady=5)
+            ttk.Label(frame, text=f"{prov.capitalize()}:").grid(
+                row=i+2, column=0, sticky="w", pady=10)
             
             key_entry = ttk.Entry(frame)
-            key_entry.grid(row=i+2, column=1, sticky="ew", pady=5, padx=(10, 10))
+            key_entry.grid(row=i+2, column=1, sticky="ew", pady=10, padx=(20, 20))
             entries[prov] = key_entry
             
             model_entry = ttk.Entry(frame)
             model_entry.insert(0, default_models[prov])
-            model_entry.grid(row=i+2, column=2, sticky="ew", pady=5)
+            model_entry.grid(row=i+2, column=2, sticky="ew", pady=10, padx=(20, 20))
             model_entries[prov] = model_entry
             
             ttk.Radiobutton(
                 frame,
                 value=prov.lower(),
                 variable=selected_provider
-            ).grid(row=i+2, column=3, pady=5, padx=(10, 0))
+            ).grid(row=i+2, column=3, pady=10, padx=(20, 0))
+        
+        # System Prompt Section
+        ttk.Label(frame, text="System Prompt", font=("Segoe UI", 12, "bold")).grid(
+            row=5, column=0, columnspan=4, pady=(30, 10), sticky="w")
+        
+        system_prompt = scrolledtext.ScrolledText(
+            frame,
+            wrap=tk.WORD,
+            height=6,
+            font=("Segoe UI", 10)
+        )
+        system_prompt.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(0, 20))
+        
+        # Default system prompt
+        default_prompt = ("You are a helpful AI assistant. When provided with text or images, "
+                         "analyze them and provide clear, concise, and relevant responses.")
         
         try:
             with open(get_config_path(), 'r') as f:
@@ -645,8 +671,12 @@ class MainWindow:
                     if "model" in provs[prov]:
                         model_entries[prov].delete(0, tk.END)
                         model_entries[prov].insert(0, provs[prov]["model"])
+            # Load saved system prompt
+            saved_prompt = config.get("system_prompt", default_prompt)
+            system_prompt.insert("1.0", saved_prompt)
         except Exception as e:
             print(f"Error loading config: {e}")
+            system_prompt.insert("1.0", default_prompt)
 
         def save():
             active = selected_provider.get()
@@ -658,7 +688,8 @@ class MainWindow:
                         "model": model_entries[prov].get().strip()
                     }
                     for prov in ["openai", "anthropic", "gemini"]
-                }
+                },
+                "system_prompt": system_prompt.get("1.0", tk.END).strip()
             }
             with open(get_config_path(), 'w') as f:
                 json.dump(config_data, f, indent=4)
@@ -670,7 +701,7 @@ class MainWindow:
             self.start_monitoring()
         
         btn_save = ttk.Button(frame, text="Save", command=save)
-        btn_save.grid(row=5, column=0, columnspan=4, pady=(20, 0))
+        btn_save.grid(row=7, column=0, columnspan=4, pady=(20, 0))
         
         frame.columnconfigure(1, weight=1)
         frame.columnconfigure(2, weight=1)
