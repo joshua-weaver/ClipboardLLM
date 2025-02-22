@@ -2378,6 +2378,7 @@
   ('json.scanner',
    'C:\\Users\\12543\\AppData\\Local\\Programs\\Python\\Python310\\lib\\json\\scanner.py',
    'PYMODULE'),
+  ('logger', 'E:\\Coding-Projects\\ClipboardLLM\\src\\logger.py', 'PYMODULE'),
   ('logging',
    'C:\\Users\\12543\\AppData\\Local\\Programs\\Python\\Python310\\lib\\logging\\__init__.py',
    'PYMODULE'),

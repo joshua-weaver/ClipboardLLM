@@ -25,9 +25,9 @@ exe = EXE(
     a.datas,
     [],
     name='ClipboardLLM',
-    debug=True,
+    debug=False,
     strip=False,
     upx=False,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
 )

@@ -17,6 +17,8 @@ import struct
 import traceback
 import PyPDF2
 from docx import Document
+import logging
+from logger import setup_logger
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -337,29 +339,148 @@ class MainWindow:
         self.root = tk.Tk()
         icon_path = get_resource_path("src/clippy.ico")
         self.root.iconbitmap(icon_path)
-        sv_ttk.set_theme("dark")
+        
+        # Theme colors from BeardedTheme Coffee-cream
+        self.theme = {
+            'background': {
+                'primary': '#EAE4E1',
+                'secondary': '#e3dbd7',
+                'paper': '#eee9e7',
+                'contrast': '#f4f1f0',
+            },
+            'text': {
+                'primary': '#36221d',
+                'secondary': '#a69692',
+                'disabled': '#36221d4d',
+            },
+            'accent': {
+                'primary': '#D3694C',
+                'secondary': '#009b74',
+                'blue': '#008ea4',
+                'purple': '#7056c4',
+            },
+            'border': '#cbbbb4',
+        }
+        
+        # Configure theme styles
+        style = ttk.Style()
+        
+        # Configure common elements
+        style.configure('.', 
+            background=self.theme['background']['primary'],
+            foreground=self.theme['text']['primary'],
+            troughcolor=self.theme['background']['secondary'],
+            selectbackground=self.theme['accent']['primary'],
+            selectforeground=self.theme['text']['primary'],
+            bordercolor=self.theme['border'],
+            lightcolor=self.theme['background']['paper'],
+            darkcolor=self.theme['background']['secondary']
+        )
+        
+        # Frame configurations
+        style.configure('TFrame', background=self.theme['background']['primary'])
+        style.configure('TLabelframe', 
+            background=self.theme['background']['primary'],
+            bordercolor=self.theme['border']
+        )
+        style.configure('TLabelframe.Label', 
+            background=self.theme['background']['primary'],
+            foreground=self.theme['text']['primary']
+        )
+        
+        # Button configurations
+        style.configure('TButton', 
+            background=self.theme['accent']['primary'],
+            foreground=self.theme['text']['primary'],
+            bordercolor=self.theme['border']
+        )
+        style.map('TButton',
+            background=[('active', self.theme['accent']['secondary'])],
+            foreground=[('active', self.theme['background']['primary'])]
+        )
+        
+        # Accent button style
+        style.configure('Accent.TButton',
+            background=self.theme['accent']['primary'],
+            foreground=self.theme['text']['primary']
+        )
+        style.map('Accent.TButton',
+            background=[('active', self.theme['accent']['secondary'])],
+            foreground=[('active', self.theme['text']['primary'])]
+        )
+        
+        # Entry configurations
+        style.configure('TEntry',
+            fieldbackground=self.theme['background']['paper'],
+            foreground=self.theme['text']['primary'],
+            bordercolor=self.theme['border']
+        )
+        
+        # Label configurations
+        style.configure('TLabel',
+            background=self.theme['background']['primary'],
+            foreground=self.theme['text']['primary']
+        )
+        
+        # Checkbutton configurations
+        style.configure('TCheckbutton',
+            background=self.theme['background']['primary'],
+            foreground=self.theme['text']['primary']
+        )
+        style.map('TCheckbutton',
+            background=[('active', self.theme['background']['secondary'])],
+            foreground=[('disabled', self.theme['text']['disabled'])]
+        )
+        
+        # Radiobutton configurations
+        style.configure('TRadiobutton',
+            background=self.theme['background']['primary'],
+            foreground=self.theme['text']['primary']
+        )
+        style.map('TRadiobutton',
+            background=[('active', self.theme['background']['secondary'])],
+            foreground=[('disabled', self.theme['text']['disabled'])]
+        )
+        
+        # Configure root and menu colors
+        self.root.configure(bg=self.theme['background']['primary'])
+        
+        # Configure menu colors
+        menu_config = {
+            'background': self.theme['background']['paper'],
+            'foreground': self.theme['text']['primary'],
+            'activebackground': self.theme['accent']['primary'],
+            'activeforeground': self.theme['background']['primary'],
+            'selectcolor': self.theme['accent']['primary']
+        }
+        
+        self.root.option_add('*Menu.background', menu_config['background'])
+        self.root.option_add('*Menu.foreground', menu_config['foreground'])
+        self.root.option_add('*Menu.activeBackground', menu_config['activebackground'])
+        self.root.option_add('*Menu.activeForeground', menu_config['activeforeground'])
+        self.root.option_add('*Menu.selectColor', menu_config['selectcolor'])
+        
         self.root.title("ClipboardLLM")
         self.root.geometry("600x800")
 
-        frame = ttk.Frame(self.root, padding="10")
+        frame = ttk.Frame(self.root, padding="10", style='TFrame')
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Chat history
+        # Chat history with theme colors
         self.chat_text = scrolledtext.ScrolledText(
             frame,
             wrap=tk.WORD,
             state=tk.DISABLED,
             font=("Segoe UI", 10),
-            background="#1e1e1e",
-            foreground="#ffffff",
-            insertbackground="#ffffff"
+            background=self.theme['background']['paper'],
+            foreground=self.theme['text']['primary'],
+            insertbackground=self.theme['text']['primary']
         )
         self.chat_text.pack(fill=tk.BOTH, expand=True)
 
-        # Add clipboard preview box (initially hidden)
+        # Preview frame with theme colors
         self.preview_frame = ttk.LabelFrame(frame, text="Clipboard Content", padding="5")
         
-        # Create a frame to hold both text and image previews
         self.preview_container = ttk.Frame(self.preview_frame)
         self.preview_container.pack(fill=tk.BOTH, expand=True)
         
@@ -368,16 +489,15 @@ class MainWindow:
             wrap=tk.WORD,
             height=3,
             font=("Segoe UI", 10),
-            background="#1e1e1e",
-            foreground="#ffffff",
-            insertbackground="#ffffff"
+            background=self.theme['background']['paper'],
+            foreground=self.theme['text']['primary'],
+            insertbackground=self.theme['text']['primary']
         )
         self.clipboard_preview.pack(fill=tk.X)
         
-        # Image preview label (hidden initially)
         self.image_preview = ttk.Label(self.preview_container)
 
-        # Input area
+        # Input area with theme colors
         input_frame = ttk.Frame(frame)
         input_frame.pack(fill=tk.X, pady=(5, 0))
         self.input_text = tk.Text(
@@ -385,17 +505,17 @@ class MainWindow:
             wrap=tk.WORD,
             height=3,
             font=("Segoe UI", 10),
-            background="#1e1e1e",
-            foreground="#ffffff",
-            insertbackground="#ffffff"
+            background=self.theme['background']['paper'],
+            foreground=self.theme['text']['primary'],
+            insertbackground=self.theme['text']['primary']
         )
         self.input_text.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         self.input_text.bind("<Return>", self.on_enter)
         self.input_text.bind("<Shift-Return>", lambda e: "break")
+        
         send_button = ttk.Button(input_frame, text="Send", command=self.send_message)
         send_button.grid(row=0, column=1, sticky="nsew")
         
-        # Auto-send toggle with callback
         self.auto_send = tk.BooleanVar(value=True)
         self.auto_send.trace_add("write", self.on_auto_send_change)
         auto_send_toggle = ttk.Checkbutton(
@@ -408,7 +528,11 @@ class MainWindow:
         
         input_frame.columnconfigure(0, weight=1)
 
-        self.status = ttk.Label(frame, text="Starting...")
+        self.status = ttk.Label(
+            frame,
+            text="Starting...",
+            foreground=self.theme['text']['secondary']
+        )
         self.status.pack(fill=tk.X, pady=(5, 0))
 
         menubar = tk.Menu(self.root)
@@ -425,6 +549,23 @@ class MainWindow:
         self._current_image = None
         self.check_config()
 
+        # Update ScrolledText widgets to match theme
+        text_config = {
+            'background': self.theme['background']['paper'],
+            'foreground': self.theme['text']['primary'],
+            'insertbackground': self.theme['text']['primary'],
+            'selectbackground': self.theme['accent']['primary'],
+            'selectforeground': self.theme['background']['paper'],
+            'inactiveselectbackground': self.theme['accent']['primary'],
+        }
+        
+        self.chat_text.configure(**text_config)
+        self.clipboard_preview.configure(**text_config)
+        self.input_text.configure(**text_config)
+
+        # Initialize logger
+        self.logger = None
+
     def on_enter(self, event):
         if not event.state & 0x1:  # Shift key not pressed
             self.send_message()
@@ -432,31 +573,40 @@ class MainWindow:
         return None
 
     def send_message(self):
+        logger = logging.getLogger('ClipboardLLM')
         context = self.input_text.get("1.0", tk.END).strip()
+        logger.debug(f"Sending message - Content type: {self.current_content_type}")
         
         if self.current_content_type == "image":
             if context:
                 message = f"Image content with additional context:\n{context}"
+                logger.debug("Image content with additional context")
             else:
                 message = "Image content"
+                logger.debug("Image content without context")
             content = self._get_current_image_data()
             self.add_message(message, is_user=True, image_data=content)
         else:
             if self._current_text and context:
                 message = f"Clipboard Content:\n{self._current_text}\n\nAdditional Context:\n{context}"
                 content = message
+                logger.debug("Text content with additional context")
             elif self._current_text:
                 message = self._current_text
                 content = self._current_text
+                logger.debug("Text content without context")
             else:
                 message = context
                 content = context
+                logger.debug("Only context message")
             self.add_message(message, is_user=True)
         
         if not content:
+            logger.warning("No content to send")
             return
         
         if not self.llm_client:
+            logger.error("LLM client not configured")
             self.add_message("Error: Please configure API key first", is_user=False)
             return
         
@@ -468,11 +618,18 @@ class MainWindow:
             self.image_preview.pack_forget()
         
         self.status.config(text="Processing message...")
+        logger.debug("Starting message processing")
         
         def process():
-            response = self.llm_client.process_content(content, self.current_content_type)
-            self.root.after(0, lambda: self.add_message(response, is_user=False))
-            self.root.after(0, lambda: self.status.config(text="Ready"))
+            try:
+                response = self.llm_client.process_content(content, self.current_content_type)
+                logger.debug("Successfully received response from LLM")
+                self.root.after(0, lambda: self.add_message(response, is_user=False))
+                self.root.after(0, lambda: self.status.config(text="Ready"))
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                self.root.after(0, lambda: self.add_message(f"Error: {str(e)}", is_user=False))
+                self.root.after(0, lambda: self.status.config(text="Error occurred"))
         
         threading.Thread(target=process, daemon=True).start()
 
@@ -490,8 +647,11 @@ class MainWindow:
             return
             
         self.current_content_type = content_type
+        logger = logging.getLogger('ClipboardLLM')
+        logger.debug(f"Clipboard changed - Content type: {content_type}")
         
         if content_type == "image":
+            logger.debug("Processing image content")
             self._current_image = content
             self._current_text = None
             try:
@@ -504,22 +664,26 @@ class MainWindow:
                 self.image_preview.configure(image=photo)
                 self.image_preview.image = photo
                 self.image_preview.pack(fill=tk.BOTH, expand=True)
+                logger.debug("Successfully processed and displayed image")
                 if self.auto_send.get():
                     self.send_message()
                 else:
                     self.preview_frame.pack(after=self.chat_text, fill=tk.X, pady=(10, 10))
                     self.status.config(text="Content loaded. Add context and press Send when ready.")
             except Exception as e:
+                logger.error(f"Error creating image preview: {e}")
                 print(f"Error creating preview: {e}")
                 self.clipboard_preview.pack(fill=tk.X)
                 self.clipboard_preview.delete("1.0", tk.END)
                 self.clipboard_preview.insert(tk.END, "[Image content copied]")
         else:
+            logger.debug("Processing text content")
             self._current_text = content
             self._current_image = None
             preview_text = content
             if len(preview_text) > 1000:
                 preview_text = preview_text[:1000] + "\n... (truncated)"
+                logger.debug("Text content truncated for preview")
             self.image_preview.pack_forget()
             self.clipboard_preview.pack(fill=tk.X)
             self.clipboard_preview.delete("1.0", tk.END)
@@ -585,6 +749,16 @@ class MainWindow:
             provider_config = providers.get(active, {})
             api_key = provider_config.get("api_key", "")
             model = provider_config.get("model", "")
+            
+            # Set up logger based on debug setting
+            debug_enabled = config.get("debug_console_enabled", False)
+            if debug_enabled:
+                self.logger = setup_logger()
+            else:
+                # Disable logging if debug is off
+                logging.getLogger('ClipboardLLM').handlers = []
+                logging.getLogger('ClipboardLLM').addHandler(logging.NullHandler())
+            
             if not api_key:
                 self.show_settings()
             else:
@@ -597,21 +771,33 @@ class MainWindow:
         dialog = tk.Toplevel(self.root)
         dialog.title("Settings")
         dialog.geometry("600x600")
+        dialog.configure(bg=self.theme['background']['primary'])
+        
         frame = ttk.Frame(dialog, padding="20")
         frame.pack(fill=tk.BOTH, expand=True)
         
-        # API Configuration Section
-        ttk.Label(frame, text="API Configuration", font=("Segoe UI", 12, "bold")).grid(
-            row=0, column=0, columnspan=4, pady=(0, 20), sticky="w")
+        # Settings headers with theme colors
+        ttk.Label(
+            frame,
+            text="API Configuration",
+            font=("Segoe UI", 12, "bold"),
+            foreground=self.theme['accent']['primary']
+        ).grid(row=0, column=0, columnspan=4, pady=(0, 20), sticky="w")
         
-        ttk.Label(frame, text="Provider", font=("Segoe UI", 10, "bold")).grid(
-            row=1, column=0, pady=(0, 10), sticky="w")
-        ttk.Label(frame, text="API Key", font=("Segoe UI", 10, "bold")).grid(
-            row=1, column=1, pady=(0, 10), sticky="w", padx=(20, 0))
-        ttk.Label(frame, text="Model", font=("Segoe UI", 10, "bold")).grid(
-            row=1, column=2, pady=(0, 10), sticky="w", padx=(20, 0))
-        ttk.Label(frame, text="Primary", font=("Segoe UI", 10, "bold")).grid(
-            row=1, column=3, pady=(0, 10), sticky="w", padx=(20, 0))
+        # Section headers with theme colors
+        for text, row in [("Provider", 1), ("API Key", 1), ("Model", 1), ("Primary", 1)]:
+            ttk.Label(
+                frame,
+                text=text,
+                font=("Segoe UI", 10, "bold"),
+                foreground=self.theme['text']['primary']
+            ).grid(
+                row=row,
+                column=["Provider", "API Key", "Model", "Primary"].index(text),
+                pady=(0, 10),
+                sticky="w",
+                padx=(20 if text != "Provider" else 0, 0)
+            )
         
         default_models = {
             "openai": "gpt-4-vision-preview",
@@ -654,6 +840,86 @@ class MainWindow:
         )
         system_prompt.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(0, 20))
         
+        # Debug Console Section
+        ttk.Label(frame, text="Debug Settings", font=("Segoe UI", 12, "bold")).grid(
+            row=7, column=0, columnspan=4, pady=(10, 10), sticky="w")
+        
+        debug_frame = ttk.Frame(frame)
+        debug_frame.grid(row=8, column=0, columnspan=4, sticky="w", pady=(0, 20))
+        
+        debug_console_enabled = tk.BooleanVar(value=False)
+        debug_toggle = ttk.Checkbutton(
+            debug_frame,
+            text="Enable Debug Console",
+            variable=debug_console_enabled,
+            style="Switch.TCheckbutton"
+        )
+        debug_toggle.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Create tooltip for debug toggle
+        debug_tooltip = tk.Label(
+            debug_frame,
+            text="Enable detailed logging to file and console",
+            background=self.theme['background']['paper'],
+            foreground=self.theme['text']['secondary'],
+            relief='solid',
+            borderwidth=1
+        )
+        
+        def show_debug_tooltip(event):
+            debug_tooltip.place(x=event.widget.winfo_x(), y=event.widget.winfo_y() + 30)
+        
+        def hide_debug_tooltip(event):
+            debug_tooltip.place_forget()
+        
+        debug_toggle.bind('<Enter>', show_debug_tooltip)
+        debug_toggle.bind('<Leave>', hide_debug_tooltip)
+        
+        # Add button to open logs directory
+        def open_logs_dir():
+            if getattr(sys, 'frozen', False):
+                # If running as exe
+                logs_dir = os.path.join(os.getenv('APPDATA'), 'ClipboardLLM', 'logs')
+            else:
+                # If running from source
+                logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+            
+            # Create directory if it doesn't exist
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Open in explorer
+            try:
+                os.startfile(logs_dir)
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not open logs directory: {str(e)}")
+        
+        logs_button = ttk.Button(
+            debug_frame,
+            text="Open Logs Folder",
+            command=open_logs_dir,
+            style="Accent.TButton"
+        )
+        logs_button.pack(side=tk.LEFT)
+        
+        # Create tooltip for logs button
+        logs_tooltip = tk.Label(
+            debug_frame,
+            text="Open the folder containing debug log files",
+            background=self.theme['background']['paper'],
+            foreground=self.theme['text']['secondary'],
+            relief='solid',
+            borderwidth=1
+        )
+        
+        def show_logs_tooltip(event):
+            logs_tooltip.place(x=event.widget.winfo_x(), y=event.widget.winfo_y() + 30)
+        
+        def hide_logs_tooltip(event):
+            logs_tooltip.place_forget()
+        
+        logs_button.bind('<Enter>', show_logs_tooltip)
+        logs_button.bind('<Leave>', hide_logs_tooltip)
+
         # Default system prompt
         default_prompt = ("You are a helpful AI assistant. When provided with text or images, "
                          "analyze them and provide clear, concise, and relevant responses.")
@@ -673,6 +939,8 @@ class MainWindow:
             # Load saved system prompt
             saved_prompt = config.get("system_prompt", default_prompt)
             system_prompt.insert("1.0", saved_prompt)
+            # Load debug console setting
+            debug_console_enabled.set(config.get("debug_console_enabled", False))
         except Exception as e:
             print(f"Error loading config: {e}")
             system_prompt.insert("1.0", default_prompt)
@@ -688,7 +956,8 @@ class MainWindow:
                     }
                     for prov in ["openai", "anthropic", "gemini"]
                 },
-                "system_prompt": system_prompt.get("1.0", tk.END).strip()
+                "system_prompt": system_prompt.get("1.0", tk.END).strip(),
+                "debug_console_enabled": debug_console_enabled.get()
             }
             with open(get_config_path(), 'w') as f:
                 json.dump(config_data, f, indent=4)
@@ -698,9 +967,19 @@ class MainWindow:
             dialog.destroy()
             self.status.config(text="Config saved!")
             self.start_monitoring()
+            
+            # Update logger based on debug setting
+            if debug_console_enabled.get():
+                self.logger = setup_logger()
+            else:
+                # Disable logging if debug is off
+                if self.logger:
+                    for handler in self.logger.handlers[:]:
+                        self.logger.removeHandler(handler)
+                logging.getLogger('ClipboardLLM').addHandler(logging.NullHandler())
         
         btn_save = ttk.Button(frame, text="Save", command=save)
-        btn_save.grid(row=7, column=0, columnspan=4, pady=(20, 0))
+        btn_save.grid(row=9, column=0, columnspan=4, pady=(20, 0))
         
         frame.columnconfigure(1, weight=1)
         frame.columnconfigure(2, weight=1)
@@ -711,6 +990,7 @@ class MainWindow:
         readme_dialog.geometry("500x400")
         readme_dialog.transient(self.root)
         readme_dialog.grab_set()
+        readme_dialog.configure(bg=self.theme['background']['primary'])
         
         frame = ttk.Frame(readme_dialog, padding="10")
         frame.grid(row=0, column=0, sticky="nsew")
