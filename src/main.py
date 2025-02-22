@@ -15,6 +15,8 @@ import io
 import base64
 import struct
 import traceback
+import PyPDF2
+from docx import Document
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -32,6 +34,31 @@ def get_config_path():
         base_dir = os.path.dirname(os.path.abspath(__file__))
     os.makedirs(base_dir, exist_ok=True)
     return os.path.join(base_dir, 'config.json')
+
+def extract_text_from_pdf(file_path):
+    """Extract text from a PDF file."""
+    try:
+        with open(file_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        print(f"Error extracting text from PDF: {str(e)}")
+        return f"Error extracting text from PDF: {str(e)}"
+
+def extract_text_from_docx(file_path):
+    """Extract text from a DOCX file."""
+    try:
+        doc = Document(file_path)
+        text = ""
+        for para in doc.paragraphs:
+            text += para.text + "\n"
+        return text
+    except Exception as e:
+        print(f"Error extracting text from DOCX: {str(e)}")
+        return f"Error extracting text from DOCX: {str(e)}"
 
 class LLMClient:
     def __init__(self, api_key, provider="openai", model=None):
@@ -246,18 +273,14 @@ class ClipboardMonitor:
                 win32clipboard.OpenClipboard()
                 content = None
                 content_type = "text"
-                current_path = None  # Track the current file path
+                current_path = None
 
-                # Check for file paths (CF_HDROP for file drops)
                 if win32clipboard.IsClipboardFormatAvailable(win32con.CF_HDROP):
                     try:
                         file_list = win32clipboard.GetClipboardData(win32con.CF_HDROP)
-                        
                         if file_list:
                             file_path = file_list[0].lower()
-                            current_path = file_path  # Store the current path
-                            
-                            # Only process if it's a different file from the last one
+                            current_path = file_path
                             if file_path != self.previous_path:
                                 if any(file_path.endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
                                     print(f"Processing image file: {file_path}")
@@ -269,11 +292,27 @@ class ClipboardMonitor:
                                             content = output.getvalue()[14:]
                                         content_type = "image"
                                         print("Successfully converted image to DIB format")
+                                elif file_path.endswith('.txt'):
+                                    print(f"Processing text file: {file_path}")
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        content = f.read()
+                                    content_type = "text"
+                                elif file_path.endswith('.pdf'):
+                                    print(f"Processing PDF file: {file_path}")
+                                    content = extract_text_from_pdf(file_path)
+                                    content_type = "text"
+                                elif file_path.endswith('.docx'):
+                                    print(f"Processing DOCX file: {file_path}")
+                                    content = extract_text_from_docx(file_path)
+                                    content_type = "text"
+                                else:
+                                    print(f"Unsupported file type: {file_path}")
+                                    win32clipboard.CloseClipboard()
+                                    continue
                     except Exception as e:
                         print(f"Error processing file path: {str(e)}")
                         traceback.print_exc()
 
-                # If no file was processed, check for image or text data
                 if content is None:
                     if win32clipboard.IsClipboardFormatAvailable(win32con.CF_DIB):
                         content = win32clipboard.GetClipboardData(win32con.CF_DIB)
@@ -285,7 +324,6 @@ class ClipboardMonitor:
 
                 win32clipboard.CloseClipboard()
 
-                # Update both content and path if we processed something new
                 if content and (content != self.previous_content or current_path != self.previous_path):
                     self.previous_content = content
                     self.previous_path = current_path
@@ -356,6 +394,7 @@ class MainWindow:
         self.input_text.bind("<Shift-Return>", lambda e: "break")
         send_button = ttk.Button(input_frame, text="Send", command=self.send_message)
         send_button.grid(row=0, column=1, sticky="nsew")
+        
         # Auto-send toggle with callback
         self.auto_send = tk.BooleanVar(value=True)
         self.auto_send.trace_add("write", self.on_auto_send_change)
@@ -382,32 +421,9 @@ class MainWindow:
         self.monitor = ClipboardMonitor(self.on_clipboard_change)
         self.llm_client = None
         self.current_content_type = "text"
+        self._current_text = None
+        self._current_image = None
         self.check_config()
-
-    def _parse_dib(self, data):
-        """Parse DIB header and convert to proper image format"""
-        try:
-            # Create a BMP header (14 bytes)
-            bmp_header = b'BM' + \
-                        len(data).to_bytes(4, 'little') + \
-                        b'\x00\x00' + \
-                        b'\x00\x00' + \
-                        b'\x36\x00\x00\x00'  # Standard header size for BMP
-            
-            # Combine BMP header with DIB data to create a complete BMP
-            bmp_data = bmp_header + data
-            
-            # Use PIL to open the BMP data directly
-            image_buffer = io.BytesIO(bmp_data)
-            image = Image.open(image_buffer)
-            
-            # Convert to RGB to ensure consistent color handling
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            
-            return image
-        except Exception as e:
-            raise ValueError(f"Failed to parse DIB data: {str(e)}")
 
     def on_enter(self, event):
         if not event.state & 0x1:  # Shift key not pressed
@@ -416,44 +432,37 @@ class MainWindow:
         return None
 
     def send_message(self):
-        """Modified to include clipboard content when sending."""
         context = self.input_text.get("1.0", tk.END).strip()
-        clipboard_content = self.clipboard_preview.get("1.0", tk.END).strip()
         
-        # Handle different content types
         if self.current_content_type == "image":
-            if context and not self.auto_send.get():
+            if context:
                 message = f"Image content with additional context:\n{context}"
             else:
                 message = "Image content"
             content = self._get_current_image_data()
-            # Add the image to the chat with the message
             self.add_message(message, is_user=True, image_data=content)
         else:
-            # Text content handling
-            if clipboard_content and context and not self.auto_send.get():
-                # Only combine content and context when auto-send is off
-                message = f"Clipboard Content:\n{clipboard_content}\n\nAdditional Context:\n{context}"
+            if self._current_text and context:
+                message = f"Clipboard Content:\n{self._current_text}\n\nAdditional Context:\n{context}"
                 content = message
-            elif clipboard_content:
-                message = clipboard_content
-                content = clipboard_content
+            elif self._current_text:
+                message = self._current_text
+                content = self._current_text
             else:
                 message = context
                 content = context
-            # Add text message without image
             self.add_message(message, is_user=True)
-
+        
         if not content:
             return
         
         if not self.llm_client:
             self.add_message("Error: Please configure API key first", is_user=False)
             return
-
-        # Clear both input boxes
+        
         self.input_text.delete("1.0", tk.END)
         self.clipboard_preview.delete("1.0", tk.END)
+        self._current_text = None
         if hasattr(self, '_current_image'):
             self._current_image = None
             self.image_preview.pack_forget()
@@ -483,51 +492,41 @@ class MainWindow:
         self.current_content_type = content_type
         
         if content_type == "image":
-            # Store the raw image data immediately
             self._current_image = content
-            
+            self._current_text = None
             try:
-                # Create preview using LLMClient's parse_dib method
                 image = self.llm_client._parse_dib(content)
-                # Process image exactly as it will be sent to AI
                 image = self.llm_client._prepare_image_for_ai(image)
-                
-                # Create preview thumbnail
                 preview_image = image.copy()
                 preview_image.thumbnail((200, 200))
                 photo = ImageTk.PhotoImage(preview_image)
-                
-                # Update preview
                 self.clipboard_preview.pack_forget()
                 self.image_preview.configure(image=photo)
-                self.image_preview.image = photo  # Keep reference
+                self.image_preview.image = photo
                 self.image_preview.pack(fill=tk.BOTH, expand=True)
-                
                 if self.auto_send.get():
-                    # Automatically send if auto-send is enabled
                     self.send_message()
                 else:
-                    # Show the preview frame if auto-send is disabled
                     self.preview_frame.pack(after=self.chat_text, fill=tk.X, pady=(10, 10))
                     self.status.config(text="Content loaded. Add context and press Send when ready.")
-                
             except Exception as e:
                 print(f"Error creating preview: {e}")
                 self.clipboard_preview.pack(fill=tk.X)
                 self.clipboard_preview.delete("1.0", tk.END)
                 self.clipboard_preview.insert(tk.END, "[Image content copied]")
         else:
-            # Text content
+            self._current_text = content
+            self._current_image = None
+            preview_text = content
+            if len(preview_text) > 1000:
+                preview_text = preview_text[:1000] + "\n... (truncated)"
             self.image_preview.pack_forget()
             self.clipboard_preview.pack(fill=tk.X)
             self.clipboard_preview.delete("1.0", tk.END)
-            self.clipboard_preview.insert(tk.END, content)
-            
+            self.clipboard_preview.insert(tk.END, preview_text)
             if self.auto_send.get():
-                # Automatically send if auto-send is enabled
                 self.send_message()
             else:
-                # Show preview when auto-send is disabled
                 self.preview_frame.pack(after=self.chat_text, fill=tk.X, pady=(10, 10))
                 self.status.config(text="Content loaded. Add context and press Send when ready.")
 
