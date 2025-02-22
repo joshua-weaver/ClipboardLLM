@@ -14,6 +14,7 @@ from PIL import Image, ImageTk
 import io
 import base64
 import struct
+import traceback
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -223,6 +224,7 @@ class ClipboardMonitor:
         self.callback = callback
         self.running = False
         self.previous_content = None
+        self.previous_path = None  # Add this to track the last processed file path
 
     def start(self):
         self.running = True
@@ -237,26 +239,49 @@ class ClipboardMonitor:
                 win32clipboard.OpenClipboard()
                 content = None
                 content_type = "text"
+                current_path = None  # Track the current file path
 
-                # Check for image first (CF_DIB is the Windows bitmap format)
-                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_DIB):
-                    content = win32clipboard.GetClipboardData(win32con.CF_DIB)
-                    content_type = "image"
-                # Fall back to text if no image
-                elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
+                # Check for file paths (CF_HDROP for file drops)
+                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_HDROP):
                     try:
+                        file_list = win32clipboard.GetClipboardData(win32con.CF_HDROP)
+                        
+                        if file_list:
+                            file_path = file_list[0].lower()
+                            current_path = file_path  # Store the current path
+                            
+                            # Only process if it's a different file from the last one
+                            if file_path != self.previous_path:
+                                if any(file_path.endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                                    print(f"Processing image file: {file_path}")
+                                    with Image.open(file_path) as img:
+                                        if img.mode != 'RGB':
+                                            img = img.convert('RGB')
+                                        with io.BytesIO() as output:
+                                            img.save(output, format='BMP')
+                                            content = output.getvalue()[14:]
+                                        content_type = "image"
+                                        print("Successfully converted image to DIB format")
+                    except Exception as e:
+                        print(f"Error processing file path: {str(e)}")
+                        traceback.print_exc()
+
+                # If no file was processed, check for image or text data
+                if content is None:
+                    if win32clipboard.IsClipboardFormatAvailable(win32con.CF_DIB):
+                        content = win32clipboard.GetClipboardData(win32con.CF_DIB)
+                        content_type = "image"
+                    elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
                         content = win32clipboard.GetClipboardData(win32con.CF_TEXT)
-                        # Only decode if it's actually text content
                         if content_type == "text":
                             content = content.decode('utf-8', errors='ignore')
-                    except Exception as e:
-                        print(f"Error decoding clipboard text: {e}")
-                        content = None
 
                 win32clipboard.CloseClipboard()
 
-                if content and content != self.previous_content:
+                # Update both content and path if we processed something new
+                if content and (content != self.previous_content or current_path != self.previous_path):
                     self.previous_content = content
+                    self.previous_path = current_path
                     self.callback(content, content_type)
             except Exception as e:
                 print(f"Clipboard error: {e}")
